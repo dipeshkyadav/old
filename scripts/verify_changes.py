@@ -107,6 +107,19 @@ def verify_changes():
             page.screenshot(path="/home/jules/verification/03_valuation_modal.png")
             print("Valuation screenshot taken.")
 
+            # Submit the book
+            print("Submitting the book...")
+            page.fill("input[name='pages']", "300")
+            page.fill("textarea[name='description']", "A great book about a wizard.")
+
+            # Click Add Book button (submit)
+            page.click("button:has-text('Add Book')")
+
+            # Wait for success toast or modal close
+            # We wait for the modal heading to disappear, specifically checking the heading role
+            expect(page.get_by_role("heading", name="Add New Book")).not_to_be_visible(timeout=10000)
+            print("Book added successfully.")
+
         except Exception as e:
             print(f"Error testing Seller Dashboard: {e}")
             page.screenshot(path="/home/jules/verification/error_screenshot.png")

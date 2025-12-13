@@ -6,6 +6,7 @@ import { Op } from 'sequelize';
 import sequelize from '@/lib/db';
 import { Book, User } from '@/models/index';
 import { authOptions } from '../auth/[...nextauth]/route';
+import Fuse from 'fuse.js';
 
 export async function GET(req) {
   try {
@@ -21,18 +22,11 @@ export async function GET(req) {
     const offset = (page - 1) * limit;
 
     let whereClause = {};
-    if (query) {
-      whereClause = {
-        [Op.or]: [
-          { title: { [Op.like]: `%${query}%` } },
-          { description: { [Op.like]: `%${query}%` } },
-          { keywords: { [Op.like]: `%${query}%` } },
-          { category: { [Op.like]: `%${query}%` } },
-        ],
-      };
-    }
+    // If using Fuse.js (Typo-tolerant) with a query, we skip SQL filtering on text fields
+    // and instead fetch a larger set to filter in memory.
+    // However, if no query, or if filtering by category only, we use SQL.
 
-    // Exact category filter if provided and not just part of query
+    // Exact category filter if provided
     if (category) {
       whereClause.category = category;
     }
@@ -47,35 +41,46 @@ export async function GET(req) {
     let order = [['createdAt', 'DESC']];
 
     if (lat && lng) {
-      // 1. Filter by Bounding Box (approx 50km radius)
-      // 1 degree latitude ~ 111km. 0.5 degrees ~ 55km.
-      const range = 0.5;
-
+      const range = 0.5; // ~55km
       include[0].where = {
         latitude: { [Op.between]: [lat - range, lat + range] },
         longitude: { [Op.between]: [lng - range, lng + range] }
       };
+    }
 
-      // If filtering by distance, we cannot easily use SQL LIMIT because sorting is done in JS (for SQLite complexity)
-      // However, bounding box significantly reduces result set.
-      // We will fetch ALL within bounding box, sort, then paginate in memory.
-      // This is a tradeoff for using SQLite/Sequelize without PostGIS.
+    // Determine fetch strategy
+    let useFuse = false;
+    if (query) {
+      useFuse = true;
+      // We don't apply SQL LIKE if using Fuse, we fetch more rows and filter.
+      // But we still apply category filter in SQL.
     }
 
     const { count, rows } = await Book.findAndCountAll({
-      where: whereClause,
+      where: whereClause, // Only category if query exists
       include: include,
       order: order,
-      // Only apply SQL limit if NOT doing distance sort (or if we accept unordered distance results in pages)
-      // For now, if lat/lng is present, we ignore SQL limit/offset and do it in JS.
-      limit: (lat && lng) ? undefined : limit,
-      offset: (lat && lng) ? undefined : offset,
-      distinct: true, // Needed for correct count with include
+      // If using Fuse, we fetch ALL matches (up to reasonable limit) then filter
+      limit: useFuse ? 500 : ((lat && lng) ? undefined : limit),
+      offset: useFuse ? 0 : ((lat && lng) ? undefined : offset),
+      distinct: true,
     });
 
     let results = rows.map(book => book.toJSON());
 
-    // Post-processing for distance if lat/lng provided
+    // 1. Fuse.js Fuzzy Search
+    if (useFuse && query) {
+      const options = {
+        keys: ['title', 'description', 'keywords', 'category', 'seller.city'],
+        threshold: 0.4, // 0.0 is perfect match, 1.0 is match anything
+        includeScore: true
+      };
+      const fuse = new Fuse(results, options);
+      const fuseResults = fuse.search(query);
+      results = fuseResults.map(result => result.item);
+    }
+
+    // 2. Geolocation Sorting
     if (lat && lng) {
       results = results.map(book => {
         const seller = book.seller;
@@ -85,33 +90,28 @@ export async function GET(req) {
         }
         return { ...book, distance: null };
       })
-      .filter(b => b.distance !== null) // optional: remove invalid location items
+      .filter(b => b.distance !== null)
       .sort((a, b) => a.distance - b.distance);
+    }
 
-      // Manual Pagination for distance sorted results
-      const total = results.length;
+    // 3. Manual Pagination (if Fuse or Geo was used)
+    let total = count;
+    if (useFuse) {
+      total = results.length; // Count changes after fuzzy filter
+    }
+
+    // If we did in-memory processing (Fuse or Geo), we need to slice manually
+    if (useFuse || (lat && lng)) {
       results = results.slice(offset, offset + limit);
-
-      return NextResponse.json({
-        data: results,
-        pagination: {
-          total: total,
-          page: page,
-          limit: limit,
-          totalPages: Math.ceil(total / limit)
-        }
-      }, {
-        headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' }
-      });
     }
 
     return NextResponse.json({
       data: results,
       pagination: {
-        total: count,
+        total: total,
         page: page,
         limit: limit,
-        totalPages: Math.ceil(count / limit)
+        totalPages: Math.ceil(total / limit)
       }
     }, {
       headers: {
