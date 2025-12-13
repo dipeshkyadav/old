@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useState, useEffect } from 'react';
@@ -71,8 +72,15 @@ export default function Home() {
       <header className="sticky top-0 z-50 bg-amber-50/95 backdrop-blur-md border-b border-amber-100 transition-all duration-300">
         <nav className="flex justify-between items-center px-6 py-1 max-w-7xl mx-auto">
           {/* Brand Logo */}
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => router.push('/')}>
-            <img src="/logo.png" alt="Pustaklinu" loading="eager" className="h-24 object-contain hover:scale-105 transition duration-300" />
+          <div className="flex items-center gap-2 cursor-pointer relative w-32 h-16" onClick={() => router.push('/')}>
+            <Image
+                src="/logo.png"
+                alt="Pustaklinu"
+                fill
+                style={{ objectFit: 'contain' }}
+                priority
+                className="hover:scale-105 transition duration-300"
+            />
           </div>
 
           {/* Center Navigation - Clean & Professional */}
@@ -178,13 +186,15 @@ export default function Home() {
             </Link>
           </div>
         </div>
-        <div className="relative">
+        <div className="relative w-full h-80 md:h-[500px]">
           <div className="absolute -inset-4 bg-amber-200 rounded-full opacity-30 blur-3xl animate-pulse"></div>
-          <img
+          <Image
             src="/landing_hero.png" // We will move the generated image here
             alt="Books Illustration"
-            loading="eager"
-            className="relative z-10 w-full h-auto drop-shadow-2xl rounded-2xl transform rotate-2 hover:rotate-0 transition duration-500"
+            fill
+            style={{ objectFit: 'contain' }}
+            priority
+            className="relative z-10 drop-shadow-2xl rounded-2xl transform rotate-2 hover:rotate-0 transition duration-500"
           />
         </div>
       </main>
@@ -214,11 +224,13 @@ export default function Home() {
               {featuredBooks.length > 0 ? featuredBooks.map(book => (
                 <Link key={book.id} href={`/dashboard/buyer?q=${encodeURIComponent(book.title)}`} className="group bg-white rounded-xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col h-full border border-amber-100 hover:-translate-y-1">
                   <div className="relative aspect-[3/4] overflow-hidden bg-gray-100">
-                    <img
+                    <Image
                       src={getBookImage(book)}
                       alt={book.title}
-                      loading="lazy"
-                      className="w-full h-full object-cover transform group-hover:scale-105 transition duration-500"
+                      fill
+                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                      style={{ objectFit: 'cover' }}
+                      className="transform group-hover:scale-105 transition duration-500"
                     />
                     <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
                       {Number(book.discount) > 0 && (

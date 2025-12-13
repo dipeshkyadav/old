@@ -10,10 +10,16 @@ import { authOptions } from '../auth/[...nextauth]/route';
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const lat = searchParams.get('lat');
-    const lng = searchParams.get('lng');
+    const latParam = searchParams.get('lat');
+    const lngParam = searchParams.get('lng');
+    const lat = latParam ? parseFloat(latParam) : null;
+    const lng = lngParam ? parseFloat(lngParam) : null;
     const query = searchParams.get('q');
     const category = searchParams.get('category');
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const offset = (page - 1) * limit;
+    const city = searchParams.get('city');
 
     let whereClause = {};
     if (query) {
@@ -30,44 +36,71 @@ export async function GET(req) {
     }
 
     // Geolocation Search
+    // Since we are using SQLite/Sequelize, we can't do efficient distance sorting in DB easily without spatial extensions.
+    // However, we can filter by bounding box if lat/lng are provided to reduce the set.
+    // ~111km per degree latitude.
+    // Let's grab books within ~50km box if lat/lng provided, then sort in JS.
+    // If pagination is requested with location sorting, it becomes tricky because we need all results to sort them first.
+    // For now, if lat/lng provided, we fetch all (with some limit) and sort, then paginate in memory.
+    // If no lat/lng, we use DB pagination.
+
     let include = [{ model: User, as: 'seller', attributes: ['name', 'latitude', 'longitude', 'city', 'state'] }];
     let order = [['createdAt', 'DESC']];
 
-    if (lat && lng) {
-      // Haversine formula for distance in km
-      const haversine = `(
-        6371 * acos(
-          cos(radians(${lat}))
-          * cos(radians(latitude))
-          * cos(radians(longitude) - radians(${lng}))
-          + sin(radians(${lat})) * sin(radians(latitude))
-        )
-      )`;
-
-      // We need to order by distance.
-      // Since 'distance' is calculated on the associated User model, it's tricky in Sequelize with standard include.
-      // We might need a raw query or a subquery, but for simplicity, let's fetch all (or filtered) and sort in JS if dataset is small,
-      // OR use a literal in the order clause if possible.
-      // However, sorting by associated column calculated value is complex.
-      // Let's try to add the distance attribute to the query.
-
-      // Simpler approach: Filter by city/state if provided in query, otherwise show all.
-      // But user asked for "near him".
-      // Let's just return all books with seller info and let frontend sort/filter, OR do a raw query.
-      // Given the constraints, I'll stick to basic filtering for now and maybe add distance sorting if time permits or use a raw query.
-
-      // Let's try to use Sequelize literal for distance in attributes.
+    if (city) {
+      include[0].where = { city: city };
     }
 
-    const books = await Book.findAll({
-      where: whereClause,
-      include: include,
-      order: order,
-    });
+    if (lat !== null && lng !== null) {
+        // Optimization: Pre-filter users (sellers) who are roughly nearby if possible.
+        // But since seller info is in User table and we are querying Books, we'd need to filter on the include.
+        // Doing this efficiently in Sequelize with include where is okay.
 
-    // Post-processing for distance if lat/lng provided
+        // 1 degree lat ~= 111 km. 1 degree lon ~= 111 * cos(lat).
+        // Let's say we want within 500km initially to be safe? Or just fetch all.
+        // If dataset is small (<1000 books), fetching all is fine.
+        // If dataset is large, we MUST do bounding box.
+
+        const R = 6371;
+        const maxDist = 500; // 500 km radius for initial fetch
+        const latDelta = maxDist / 111;
+        // approximate lonDelta
+        const lonDelta = maxDist / (111 * Math.cos(lat * (Math.PI/180)));
+
+        const minLat = lat - latDelta;
+        const maxLat = lat + latDelta;
+        const minLon = lng - lonDelta;
+        const maxLon = lng + lonDelta;
+
+        if (!include[0].where) include[0].where = {};
+        include[0].where = {
+            ...include[0].where,
+            latitude: { [Op.between]: [minLat, maxLat] },
+            longitude: { [Op.between]: [minLon, maxLon] }
+        };
+    }
+
+    // If we are doing location based sort, we need to fetch all matching candidates first, sort, then paginate.
+    // If not, use DB pagination.
+
+    const isLocationSort = lat !== null && lng !== null;
+
+    const queryOptions = {
+        where: whereClause,
+        include: include,
+        order: order,
+    };
+
+    if (!isLocationSort) {
+        queryOptions.limit = limit;
+        queryOptions.offset = offset;
+    }
+
+    const { count, rows: books } = await Book.findAndCountAll(queryOptions);
+
     let results = books.map(book => book.toJSON());
-    if (lat && lng) {
+
+    if (isLocationSort) {
       results = results.map(book => {
         const seller = book.seller;
         if (seller && seller.latitude && seller.longitude) {
@@ -80,11 +113,27 @@ export async function GET(req) {
         if (b.distance === null) return -1;
         return a.distance - b.distance;
       });
+
+      // Manual pagination
+      const total = results.length;
+      results = results.slice(offset, offset + limit);
+
+      return NextResponse.json(results, {
+          headers: {
+            'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+            'X-Total-Count': total.toString(),
+            'X-Page': page.toString(),
+            'X-Total-Pages': Math.ceil(total / limit).toString()
+          },
+      });
     }
 
     return NextResponse.json(results, {
       headers: {
         'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        'X-Total-Count': count.toString(),
+        'X-Page': page.toString(),
+        'X-Total-Pages': Math.ceil(count / limit).toString()
       },
     });
   } catch (error) {

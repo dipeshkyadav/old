@@ -1,10 +1,28 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { Book } from '@/models/index';
+import { Book, User } from '@/models/index';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
 import { writeFile } from 'fs/promises';
 import path from 'path';
+
+export async function GET(req, { params }) {
+  try {
+    const { id } = await params;
+    const book = await Book.findByPk(id, {
+        include: [{ model: User, as: 'seller', attributes: ['name', 'latitude', 'longitude', 'city', 'state'] }]
+    });
+
+    if (!book) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(book);
+  } catch (error) {
+    console.error('Book GET error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
 
 export async function PUT(req, { params }) {
   try {
