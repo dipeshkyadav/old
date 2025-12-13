@@ -7,6 +7,7 @@ import { signOut } from 'next-auth/react';
 import { Plus, Edit, Trash2, Eye, Loader2, Upload, BookOpen, DollarSign, FileText, Tag, X, ArrowLeft, ArrowRight, LogOut, Info as InfoIcon } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Modal from '@/components/Modal';
+import Image from 'next/image';
 
 export default function SellerDashboard() {
   const { data: session, status } = useSession();
@@ -358,12 +359,14 @@ export default function SellerDashboard() {
               >
                 {/* Image */}
                 <div className="relative aspect-[4/5] overflow-hidden bg-gray-100">
-                  <img
+                  <Image
                     src={getBookImage(book)}
                     alt={book.title}
-                    className="w-full h-full object-cover transform group-hover:scale-110 transition duration-500"
+                    fill
+                    className="object-cover transform group-hover:scale-110 transition duration-500"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 z-10">
                     <button
                       onClick={() => openModal('view', book)}
                       className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-700 transition"
@@ -431,8 +434,8 @@ export default function SellerDashboard() {
                 imgs = Array.isArray(imgs) ? imgs : [];
                 return imgs.length > 0 ? (
                   imgs.map((img, idx) => (
-                    <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100">
-                      <img src={img} alt={`${selectedBook.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                    <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 relative">
+                      <Image src={img} alt={`${selectedBook.title} ${idx + 1}`} fill className="object-cover" />
                     </div>
                   ))
                 ) : (
@@ -484,8 +487,8 @@ export default function SellerDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     {imageList.map((item, idx) => (
                       <div key={item.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 group">
-                        <img src={item.url} alt="Preview" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <Image src={item.url} alt="Preview" fill className="object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-10">
                           {idx > 0 && (
                             <button type="button" onClick={() => moveImage(idx, 'left')} className="p-1 bg-white rounded-full text-gray-700 hover:text-black">
                               <ArrowLeft className="w-4 h-4" />

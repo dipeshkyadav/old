@@ -534,8 +534,8 @@ export default function BuyerDashboard() {
                     imgs = Array.isArray(imgs) ? imgs : [];
                     return imgs.length > 0 ? (
                       imgs.map((img, idx) => (
-                        <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100">
-                          <img src={img} alt={`${viewBook.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                        <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 relative">
+                          <Image src={img} alt={`${viewBook.title} ${idx + 1}`} fill className="object-cover" sizes="50vw" />
                         </div>
                       ))
                     ) : (
