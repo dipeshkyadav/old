@@ -29,8 +29,13 @@ export default function SellerDashboard() {
     category: '',
     keywords: '',
     discount: '',
+    condition: 'good',
+    originalPrice: '',
     images: [],
   });
+
+  const [valuationData, setValuationData] = useState(null);
+  const [isValuating, setIsValuating] = useState(false);
   // State to track all images (existing URLs and new Files)
   // Each item: { id: string (unique), url: string, file?: File, isNew: boolean }
   const [imageList, setImageList] = useState([]);
@@ -78,10 +83,11 @@ export default function SellerDashboard() {
     setSelectedBook(book);
 
     if (type === 'add') {
-      setFormData({ title: '', pages: '', price: '', description: '', category: '', keywords: '', discount: '', images: [] });
+      setFormData({ title: '', pages: '', price: '', description: '', category: '', keywords: '', discount: '', condition: 'good', originalPrice: '', images: [] });
       setImageList([]);
       setTags([]);
       setTagInput('');
+      setValuationData(null);
     } else if (type === 'edit' && book) {
       setFormData({
         title: book.title,
@@ -91,7 +97,9 @@ export default function SellerDashboard() {
         category: book.category,
         keywords: book.keywords || '',
         discount: book.discount || '',
-        images: [], // Keep empty, only update if new files selected
+        condition: 'good', // Should fetch from book if available
+        originalPrice: '',
+        images: [],
       });
       // Set preview from existing images
       let imgs = book.images;
@@ -134,6 +142,35 @@ export default function SellerDashboard() {
     } else {
       setFormData({ ...formData, [e.target.name]: e.target.value });
     }
+  };
+
+  const getValuation = async () => {
+      if (!formData.category || !formData.condition || !formData.originalPrice) {
+          toast.info("Please fill Category, Condition and Original Price to get valuation.");
+          return;
+      }
+      setIsValuating(true);
+      try {
+          const res = await fetch('/api/valuation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  category: formData.category,
+                  condition: formData.condition,
+                  originalPrice: parseFloat(formData.originalPrice)
+              })
+          });
+          const data = await res.json();
+          setValuationData(data);
+          if (data.estimatedPrice) {
+              setFormData(prev => ({ ...prev, price: data.estimatedPrice }));
+          }
+      } catch (error) {
+          console.error(error);
+          toast.error("Failed to get valuation");
+      } finally {
+          setIsValuating(false);
+      }
   };
 
   const removeImage = (id) => {
@@ -529,7 +566,48 @@ export default function SellerDashboard() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">Price</label>
+                  <label className="block text-sm font-medium text-gray-700">Condition</label>
+                  <select name="condition" value={formData.condition} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900">
+                      <option value="new">New</option>
+                      <option value="like-new">Like New</option>
+                      <option value="good">Good</option>
+                      <option value="fair">Fair</option>
+                      <option value="poor">Poor</option>
+                  </select>
+              </div>
+               <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Original Price (MRP)</label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                  <input
+                    type="number"
+                    name="originalPrice"
+                    value={formData.originalPrice}
+                    onChange={handleChange}
+                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+                    placeholder="MRP"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+                <button type="button" onClick={getValuation} disabled={isValuating} className="text-sm text-amber-600 hover:underline flex items-center gap-1">
+                    {isValuating ? <Loader2 className="w-3 h-3 animate-spin" /> : <DollarSign className="w-3 h-3" />}
+                    Get Price Valuation
+                </button>
+            </div>
+
+            {valuationData && valuationData.range && (
+                <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800 border border-blue-200">
+                    <p className="font-bold">Estimated Value: {valuationData.currency} {valuationData.range.min} - {valuationData.range.max}</p>
+                    <p className="text-xs">Based on {formData.condition} condition and category demand.</p>
+                </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Your Selling Price</label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                   <input
@@ -537,7 +615,7 @@ export default function SellerDashboard() {
                     name="price"
                     value={formData.price}
                     onChange={handleChange}
-                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900 font-bold text-amber-600"
                     placeholder="0.00"
                     required
                   />

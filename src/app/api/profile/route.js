@@ -4,6 +4,8 @@ import { authOptions } from '../auth/[...nextauth]/route';
 import { User } from '@/models/index';
 import bcrypt from 'bcrypt';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req) {
     try {
         const session = await getServerSession(authOptions);

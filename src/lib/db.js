@@ -6,6 +6,7 @@ if (process.env.NODE_ENV === 'production') {
   sequelize = new Sequelize(
     process.env.DB_NAME || 'old_book_platform',
     process.env.DB_USER || 'root',
+    process.env.DB_PASS || null,
     {
       dialect: 'sqlite',
       storage: './database.sqlite',
