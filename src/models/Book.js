@@ -36,7 +36,7 @@ const Book = sequelize.define('Book', {
     defaultValue: 0,
   },
   images: {
-    type: DataTypes.JSON,
+    type: DataTypes.JSON, // Stores array of image URLs
     allowNull: true,
   },
   sellerId: {
@@ -46,6 +46,10 @@ const Book = sequelize.define('Book', {
   status: {
     type: DataTypes.ENUM('available', 'on-hold', 'sold'),
     defaultValue: 'available',
+  },
+  views: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
   }
 });
 

@@ -66,9 +66,14 @@ export default function SellerDashboard() {
   const fetchBooks = async () => {
     try {
       const res = await fetch('/api/books');
-      const data = await res.json();
-      if (session?.user?.id) {
-        setBooks(data.filter(b => b.sellerId === session.user.id));
+      const jsonData = await res.json();
+      // Handle paginated response structure { data: [], pagination: {} }
+      const booksData = jsonData.data || jsonData;
+
+      if (session?.user?.id && Array.isArray(booksData)) {
+        setBooks(booksData.filter(b => b.sellerId === session.user.id));
+      } else {
+        setBooks([]);
       }
     } catch (error) {
       console.error("Failed to fetch books", error);

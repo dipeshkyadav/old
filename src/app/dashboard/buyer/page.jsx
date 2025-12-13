@@ -3,10 +3,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ShoppingCart, MapPin, Search, Filter, BookOpen, User, X, Trash2, CheckCircle, Star, TrendingUp, Heart } from 'lucide-react';
+import { ShoppingCart, MapPin, Search, Filter, BookOpen, User, X, Trash2, CheckCircle, Star, TrendingUp, Heart, Eye } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Link from 'next/link';
 import Image from 'next/image';
+import Modal from '@/components/Modal';
 
 export default function BuyerDashboard() {
   const { data: session } = useSession();
@@ -25,6 +26,9 @@ export default function BuyerDashboard() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // View Details Modal State
+  const [viewBook, setViewBook] = useState(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -76,31 +80,50 @@ export default function BuyerDashboard() {
     else setLoadingMore(true);
 
     try {
-      let url = `/api/books?q=${encodeURIComponent(urlQuery)}&page=${page}&limit=12`;
-      if (location.lat && location.lng) {
-        url += `&lat=${location.lat}&lng=${location.lng}`;
-      }
-      if (selectedCity) {
-        url += `&city=${selectedCity}`;
-      }
-      if (urlCategory) {
-          url += `&category=${encodeURIComponent(urlCategory)}`;
+      let url = '';
+      const isRecommendation = !urlQuery && !urlCategory && !selectedCity && page === 1;
+
+      if (isRecommendation) {
+          // If no filters, fetch recommendations (Trending)
+          url = `/api/recommendations?limit=12`;
+      } else {
+          url = `/api/books?q=${encodeURIComponent(urlQuery)}&page=${page}&limit=12`;
+          if (location.lat && location.lng) {
+            url += `&lat=${location.lat}&lng=${location.lng}`;
+          }
+          if (selectedCity) {
+            url += `&city=${selectedCity}`;
+          }
+          if (urlCategory) {
+              url += `&category=${encodeURIComponent(urlCategory)}`;
+          }
       }
 
       const res = await fetch(url);
       const responseData = await res.json();
-      const newBooks = responseData.data || [];
 
-      // Handle pagination
+      // Handle array response from recommendations vs object response from books
+      let newBooks = [];
+      let paginationData = { page: 1, totalPages: 1 };
+
+      if (Array.isArray(responseData)) {
+          newBooks = responseData;
+          // Recommendations don't have pagination metadata usually, or we treat it as single page
+      } else {
+          newBooks = responseData.data || [];
+          if (responseData.pagination) {
+              paginationData = responseData.pagination;
+          }
+      }
+
+      // Handle pagination append vs replace
       if (page === 1) {
         setBooks(newBooks);
       } else {
         setBooks(prev => [...prev, ...newBooks]);
       }
 
-      if (responseData.pagination) {
-          setPagination(responseData.pagination);
-      }
+      setPagination(paginationData);
 
     } catch (error) {
       console.error("Failed to fetch books", error);
@@ -208,6 +231,15 @@ export default function BuyerDashboard() {
     return Math.round(price - (price * discount / 100));
   };
 
+  const handleViewBook = async (book) => {
+      // Trigger view increment
+      try {
+          fetch(`/api/books/${book.id}`); // Fire and forget view increment
+      } catch(e) { console.error(e); }
+
+      setViewBook(book);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20 relative">
 
@@ -220,7 +252,7 @@ export default function BuyerDashboard() {
             ) : urlCategory ? (
               <span>Category: <span className="font-bold text-gray-900">{urlCategory}</span></span>
             ) : (
-              <span>Showing all books nearby</span>
+              <span className="flex items-center gap-1"><TrendingUp className="w-4 h-4 text-amber-600" /> Trending & Recommended</span>
             )}
           </div>
 
@@ -387,7 +419,10 @@ export default function BuyerDashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {books.map((book) => (
                 <div key={book.id} className="group bg-white rounded-xl shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 border border-gray-100 overflow-hidden flex flex-col h-full relative hover:-translate-y-1">
-                    <div className="relative aspect-[3/4] overflow-hidden bg-gray-100">
+                    <div
+                        className="relative aspect-[3/4] overflow-hidden bg-gray-100 cursor-pointer"
+                        onClick={() => handleViewBook(book)}
+                    >
                     <Image
                         src={getBookImage(book)}
                         alt={book.title}
@@ -395,11 +430,10 @@ export default function BuyerDashboard() {
                         sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                         className="object-cover transform group-hover:scale-105 transition duration-700"
                     />
-                    <div className="absolute top-0 right-0 p-3">
-                        <button className="p-2 bg-white/80 backdrop-blur rounded-full text-gray-500 hover:text-red-500 transition shadow-sm">
-                        <Heart className="w-4 h-4" />
+                    <div className="absolute top-0 right-0 p-3 flex gap-2">
+                        <button className="p-2 bg-white/80 backdrop-blur rounded-full text-gray-500 hover:text-blue-500 transition shadow-sm" title="View Details">
+                            <Eye className="w-4 h-4" />
                         </button>
-
                     </div>
 
                     {/* Discount Badge */}
@@ -425,7 +459,7 @@ export default function BuyerDashboard() {
                     </div>
 
                     <div className="p-5 flex-1 flex flex-col">
-                    <div className="flex-1">
+                    <div className="flex-1 cursor-pointer" onClick={() => handleViewBook(book)}>
                         <div className="flex justify-between items-start mb-2">
                         <h3 className="font-bold text-lg text-gray-800 line-clamp-1 group-hover:text-amber-700 transition" title={book.title}>{book.title}</h3>
                         </div>
@@ -482,6 +516,78 @@ export default function BuyerDashboard() {
           </>
         )}
       </div>
+
+      {/* Book Details Modal */}
+      <Modal
+        isOpen={!!viewBook}
+        onClose={() => setViewBook(null)}
+        title={viewBook ? viewBook.title : 'Book Details'}
+      >
+          {viewBook && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-2">
+                  {(() => {
+                    let imgs = viewBook.images;
+                    if (typeof imgs === 'string') {
+                      try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; }
+                    }
+                    imgs = Array.isArray(imgs) ? imgs : [];
+                    return imgs.length > 0 ? (
+                      imgs.map((img, idx) => (
+                        <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100">
+                          <img src={img} alt={`${viewBook.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center text-gray-400">
+                        No Images
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                      <h2 className="2xl font-bold text-gray-800">{viewBook.title}</h2>
+                      <div className="text-sm text-gray-500 flex items-center gap-1">
+                          <Eye className="w-4 h-4" /> {viewBook.views !== undefined ? viewBook.views + 1 : 1} views
+                      </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-2 mb-4">
+                    <span className="px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-sm font-medium">{viewBook.category}</span>
+                    <span className="text-xl font-bold text-amber-600">Rs. {calculateDiscountedPrice(viewBook.price, viewBook.discount)}</span>
+                    {Number(viewBook.discount) > 0 && (
+                      <span className="px-2 py-1 bg-red-100 text-red-600 text-xs font-bold rounded-md">-{viewBook.discount}% OFF</span>
+                    )}
+                  </div>
+                  <p className="text-gray-600 leading-relaxed">{viewBook.description}</p>
+                  <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-gray-500">
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <span className="block font-medium text-gray-700">Pages</span>
+                      {viewBook.pages}
+                    </div>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <span className="block font-medium text-gray-700">Seller</span>
+                      {viewBook.seller ? viewBook.seller.name : 'Unknown'}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                      <button
+                        onClick={() => { addToCart(viewBook); setViewBook(null); }}
+                        disabled={viewBook.status && viewBook.status !== 'available'}
+                        className={`w-full py-3 rounded-xl font-medium transition flex items-center justify-center gap-2 ${viewBook.status && viewBook.status !== 'available'
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-900 text-white hover:bg-amber-600 shadow-lg'
+                        }`}
+                      >
+                        <ShoppingCart className="w-4 h-4" /> Add to Cart
+                      </button>
+                  </div>
+                </div>
+              </div>
+          )}
+      </Modal>
     </div>
   );
 }

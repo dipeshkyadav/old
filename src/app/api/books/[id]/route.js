@@ -6,6 +6,25 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { writeFile } from 'fs/promises';
 import path from 'path';
 
+export async function GET(req, { params }) {
+  try {
+    const { id } = await params;
+    const book = await Book.findByPk(id);
+
+    if (!book) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+
+    // Increment views
+    await book.increment('views');
+
+    return NextResponse.json(book);
+  } catch (error) {
+    console.error('Book GET error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);

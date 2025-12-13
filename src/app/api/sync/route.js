@@ -10,6 +10,6 @@ export async function GET() {
     return NextResponse.json({ message: 'Database synced successfully' });
   } catch (error) {
     console.error('Sync error:', error);
-    return NextResponse.json({ error: 'Failed to sync database' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to sync database', details: error.message, stack: error.stack }, { status: 500 });
   }
 }
