@@ -152,7 +152,7 @@ export default function MyOrders() {
           </div>
         ) : orders.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-2xl border border-gray-100">
-            <p className="text-gray-500">You haven't placed any orders yet.</p>
+            <p className="text-gray-500">You haven&apos;t placed any orders yet.</p>
             <Link href="/dashboard/buyer" className="text-amber-600 font-medium mt-2 inline-block hover:underline">
               Browse Books
             </Link>

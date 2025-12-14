@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { Order, Book, User } from '@/models/index';
-import { authOptions } from '../../../auth/[...nextauth]/route';
+import { authOptions } from '../../auth/[...nextauth]/route';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req) {
     try {

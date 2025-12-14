@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { BookOpen, Search, ShoppingCart, User, LogOut, Menu, X, Heart, Home, Grid, MessageSquare } from 'lucide-react';
@@ -36,7 +37,7 @@ export default function BuyerLayout({ children }) {
                         {/* Logo */}
                         <div className="flex-shrink-0 flex items-center gap-2 cursor-pointer" onClick={() => router.push('/dashboard/buyer')}>
                             {/* <BookOpen className="h-9 w-9 text-amber-600" /> */}
-                            <img src="/logo.png" alt="Pustaklinu" loading="eager" className="h-24 object-contain" />
+                            <Image src="/logo.png" alt="Pustaklinu" width={96} height={96} priority className="h-24 w-auto object-contain" />
                         </div>
 
                         {/* Search Bar - Hidden on mobile, shown on md+ */}

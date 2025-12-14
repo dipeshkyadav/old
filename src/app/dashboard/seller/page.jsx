@@ -7,6 +7,7 @@ import { signOut } from 'next-auth/react';
 import { Plus, Edit, Trash2, Eye, Loader2, Upload, BookOpen, DollarSign, FileText, Tag, X, ArrowLeft, ArrowRight, LogOut, Info as InfoIcon } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Modal from '@/components/Modal';
+import Image from 'next/image';
 
 export default function SellerDashboard() {
   const { data: session, status } = useSession();
@@ -29,8 +30,13 @@ export default function SellerDashboard() {
     category: '',
     keywords: '',
     discount: '',
+    condition: 'good',
+    originalPrice: '',
     images: [],
   });
+
+  const [valuationData, setValuationData] = useState(null);
+  const [isValuating, setIsValuating] = useState(false);
   // State to track all images (existing URLs and new Files)
   // Each item: { id: string (unique), url: string, file?: File, isNew: boolean }
   const [imageList, setImageList] = useState([]);
@@ -61,9 +67,14 @@ export default function SellerDashboard() {
   const fetchBooks = async () => {
     try {
       const res = await fetch('/api/books');
-      const data = await res.json();
-      if (session?.user?.id) {
-        setBooks(data.filter(b => b.sellerId === session.user.id));
+      const jsonData = await res.json();
+      // Handle paginated response structure { data: [], pagination: {} }
+      const booksData = jsonData.data || jsonData;
+
+      if (session?.user?.id && Array.isArray(booksData)) {
+        setBooks(booksData.filter(b => b.sellerId === session.user.id));
+      } else {
+        setBooks([]);
       }
     } catch (error) {
       console.error("Failed to fetch books", error);
@@ -78,10 +89,11 @@ export default function SellerDashboard() {
     setSelectedBook(book);
 
     if (type === 'add') {
-      setFormData({ title: '', pages: '', price: '', description: '', category: '', keywords: '', discount: '', images: [] });
+      setFormData({ title: '', pages: '', price: '', description: '', category: '', keywords: '', discount: '', condition: 'good', originalPrice: '', images: [] });
       setImageList([]);
       setTags([]);
       setTagInput('');
+      setValuationData(null);
     } else if (type === 'edit' && book) {
       setFormData({
         title: book.title,
@@ -91,7 +103,9 @@ export default function SellerDashboard() {
         category: book.category,
         keywords: book.keywords || '',
         discount: book.discount || '',
-        images: [], // Keep empty, only update if new files selected
+        condition: 'good', // Should fetch from book if available
+        originalPrice: '',
+        images: [],
       });
       // Set preview from existing images
       let imgs = book.images;
@@ -134,6 +148,35 @@ export default function SellerDashboard() {
     } else {
       setFormData({ ...formData, [e.target.name]: e.target.value });
     }
+  };
+
+  const getValuation = async () => {
+      if (!formData.category || !formData.condition || !formData.originalPrice) {
+          toast.info("Please fill Category, Condition and Original Price to get valuation.");
+          return;
+      }
+      setIsValuating(true);
+      try {
+          const res = await fetch('/api/valuation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  category: formData.category,
+                  condition: formData.condition,
+                  originalPrice: parseFloat(formData.originalPrice)
+              })
+          });
+          const data = await res.json();
+          setValuationData(data);
+          if (data.estimatedPrice) {
+              setFormData(prev => ({ ...prev, price: data.estimatedPrice }));
+          }
+      } catch (error) {
+          console.error(error);
+          toast.error("Failed to get valuation");
+      } finally {
+          setIsValuating(false);
+      }
   };
 
   const removeImage = (id) => {
@@ -316,12 +359,14 @@ export default function SellerDashboard() {
               >
                 {/* Image */}
                 <div className="relative aspect-[4/5] overflow-hidden bg-gray-100">
-                  <img
+                  <Image
                     src={getBookImage(book)}
                     alt={book.title}
-                    className="w-full h-full object-cover transform group-hover:scale-110 transition duration-500"
+                    fill
+                    className="object-cover transform group-hover:scale-110 transition duration-500"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 z-10">
                     <button
                       onClick={() => openModal('view', book)}
                       className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-700 transition"
@@ -389,8 +434,8 @@ export default function SellerDashboard() {
                 imgs = Array.isArray(imgs) ? imgs : [];
                 return imgs.length > 0 ? (
                   imgs.map((img, idx) => (
-                    <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100">
-                      <img src={img} alt={`${selectedBook.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                    <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 relative">
+                      <Image src={img} alt={`${selectedBook.title} ${idx + 1}`} fill className="object-cover" />
                     </div>
                   ))
                 ) : (
@@ -442,8 +487,8 @@ export default function SellerDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     {imageList.map((item, idx) => (
                       <div key={item.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 group">
-                        <img src={item.url} alt="Preview" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <Image src={item.url} alt="Preview" fill className="object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-10">
                           {idx > 0 && (
                             <button type="button" onClick={() => moveImage(idx, 'left')} className="p-1 bg-white rounded-full text-gray-700 hover:text-black">
                               <ArrowLeft className="w-4 h-4" />
@@ -529,7 +574,48 @@ export default function SellerDashboard() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">Price</label>
+                  <label className="block text-sm font-medium text-gray-700">Condition</label>
+                  <select name="condition" value={formData.condition} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900">
+                      <option value="new">New</option>
+                      <option value="like-new">Like New</option>
+                      <option value="good">Good</option>
+                      <option value="fair">Fair</option>
+                      <option value="poor">Poor</option>
+                  </select>
+              </div>
+               <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Original Price (MRP)</label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                  <input
+                    type="number"
+                    name="originalPrice"
+                    value={formData.originalPrice}
+                    onChange={handleChange}
+                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+                    placeholder="MRP"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+                <button type="button" onClick={getValuation} disabled={isValuating} className="text-sm text-amber-600 hover:underline flex items-center gap-1">
+                    {isValuating ? <Loader2 className="w-3 h-3 animate-spin" /> : <DollarSign className="w-3 h-3" />}
+                    Get Price Valuation
+                </button>
+            </div>
+
+            {valuationData && valuationData.range && (
+                <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800 border border-blue-200">
+                    <p className="font-bold">Estimated Value: {valuationData.currency} {valuationData.range.min} - {valuationData.range.max}</p>
+                    <p className="text-xs">Based on {formData.condition} condition and category demand.</p>
+                </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Your Selling Price</label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                   <input
@@ -537,7 +623,7 @@ export default function SellerDashboard() {
                     name="price"
                     value={formData.price}
                     onChange={handleChange}
-                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+                    className="w-full pl-10 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none text-gray-900 font-bold text-amber-600"
                     placeholder="0.00"
                     required
                   />

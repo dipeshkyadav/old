@@ -3,10 +3,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ShoppingCart, MapPin, Search, Filter, BookOpen, User, X, Trash2, CheckCircle, Star, TrendingUp, Heart } from 'lucide-react';
+import { ShoppingCart, MapPin, Search, Filter, BookOpen, User, X, Trash2, CheckCircle, Star, TrendingUp, Heart, Eye } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Link from 'next/link';
 import Image from 'next/image';
+import Modal from '@/components/Modal';
 
 export default function BuyerDashboard() {
   const { data: session } = useSession();
@@ -16,15 +17,18 @@ export default function BuyerDashboard() {
   const urlCategory = searchParams.get('category') || '';
 
   const [books, setBooks] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1 });
   const [cart, setCart] = useState([]);
   const [location, setLocation] = useState({ lat: null, lng: null });
-  // Search is now driven by URL, but we keep local state for valid react effect dependency if needed, 
-  // or just derive directly. Let's derive directly to avoid sync issues.
   const [cities, setCities] = useState([]);
   const [selectedCity, setSelectedCity] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // View Details Modal State
+  const [viewBook, setViewBook] = useState(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -44,13 +48,14 @@ export default function BuyerDashboard() {
         console.error("Failed to parse cart", e);
       }
     }
-    setIsLoaded(true); // Mark as loaded
+    setIsLoaded(true);
     fetchCities();
   }, []);
 
   useEffect(() => {
-    fetchBooks();
-  }, [location, urlQuery, urlCategory, selectedCity]); // React to URL changes
+    setBooks([]); // Clear books when filter changes
+    fetchBooks(1);
+  }, [location, urlQuery, urlCategory, selectedCity]);
 
   // Save cart to local storage whenever it changes
   useEffect(() => {
@@ -70,42 +75,68 @@ export default function BuyerDashboard() {
     }
   };
 
-  const fetchBooks = async () => {
-    setLoading(true);
+  const fetchBooks = async (page = 1) => {
+    if (page === 1) setLoading(true);
+    else setLoadingMore(true);
+
     try {
-      let url = `/api/books?q=${encodeURIComponent(urlQuery)}`;
-      if (location.lat && location.lng) {
-        url += `&lat=${location.lat}&lng=${location.lng}`;
+      let url = '';
+      const isRecommendation = !urlQuery && !urlCategory && !selectedCity && page === 1;
+
+      if (isRecommendation) {
+          // If no filters, fetch recommendations (Trending)
+          url = `/api/recommendations?limit=12`;
+      } else {
+          url = `/api/books?q=${encodeURIComponent(urlQuery)}&page=${page}&limit=12`;
+          if (location.lat && location.lng) {
+            url += `&lat=${location.lat}&lng=${location.lng}`;
+          }
+          if (selectedCity) {
+            url += `&city=${selectedCity}`;
+          }
+          if (urlCategory) {
+              url += `&category=${encodeURIComponent(urlCategory)}`;
+          }
       }
-      if (selectedCity) {
-        url += `&city=${selectedCity}`;
-      }
-      // Note: Backend might not support category filtering yet, but we will filter client side if needed or pass it
-      // For now passing it as q or separate param if API supported it. 
-      // Assuming API uses q for general search. If we want strict category, we'd need to update API.
-      // For this demo, we'll filter client side if category is present and not part of text search.
 
       const res = await fetch(url);
-      const data = await res.json();
+      const responseData = await res.json();
 
-      let filteredData = Array.isArray(data) ? data : [];
-      if (selectedCity && Array.isArray(data)) {
-        filteredData = data.filter(book => book.seller?.city?.toLowerCase() === selectedCity.toLowerCase());
-      }
-      if (urlCategory) {
-        // Simple client-side category filter for demo purposes
-        filteredData = filteredData.filter(book =>
-          book.category?.toLowerCase().includes(urlCategory.toLowerCase()) ||
-          book.genre?.toLowerCase().includes(urlCategory.toLowerCase())
-        );
+      // Handle array response from recommendations vs object response from books
+      let newBooks = [];
+      let paginationData = { page: 1, totalPages: 1 };
+
+      if (Array.isArray(responseData)) {
+          newBooks = responseData;
+          // Recommendations don't have pagination metadata usually, or we treat it as single page
+      } else {
+          newBooks = responseData.data || [];
+          if (responseData.pagination) {
+              paginationData = responseData.pagination;
+          }
       }
 
-      setBooks(filteredData);
+      // Handle pagination append vs replace
+      if (page === 1) {
+        setBooks(newBooks);
+      } else {
+        setBooks(prev => [...prev, ...newBooks]);
+      }
+
+      setPagination(paginationData);
+
     } catch (error) {
       console.error("Failed to fetch books", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  const loadMore = () => {
+      if (pagination.page < pagination.totalPages) {
+          fetchBooks(pagination.page + 1);
+      }
   };
 
   const addToCart = (book) => {
@@ -116,25 +147,24 @@ export default function BuyerDashboard() {
     }
     if (cart.some(item => item.id === book.id)) {
       toast.info('Item already in cart');
-      setIsCartOpen(true); // Open cart so user can see it
+      setIsCartOpen(true);
       return;
     }
     const basePrice = calculateDiscountedPrice(book.price, book.discount);
-    // Calculate 10% platform fee (donation) on the discounted price
     const platformFee = Math.round(basePrice * 0.10);
     const finalPrice = basePrice + platformFee;
 
     const newCart = [...cart, {
       ...book,
       bookId: book.id,
-      price: finalPrice, // Total price including fee
-      basePrice: basePrice, // Price before fee
-      platformFee: platformFee, // The fee amount
+      price: finalPrice,
+      basePrice: basePrice,
+      platformFee: platformFee,
       originalPrice: book.price
     }];
     setCart(newCart);
     toast.success('Added to cart');
-    setIsCartOpen(true); // Open cart to show user
+    setIsCartOpen(true);
   };
 
   const removeFromCart = (id) => {
@@ -201,6 +231,15 @@ export default function BuyerDashboard() {
     return Math.round(price - (price * discount / 100));
   };
 
+  const handleViewBook = async (book) => {
+      // Trigger view increment
+      try {
+          fetch(`/api/books/${book.id}`); // Fire and forget view increment
+      } catch(e) { console.error(e); }
+
+      setViewBook(book);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20 relative">
 
@@ -209,11 +248,11 @@ export default function BuyerDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row gap-4 items-center justify-between">
           <div className="text-gray-600 text-sm">
             {urlQuery ? (
-              <span>Results for <span className="font-bold text-gray-900">"{urlQuery}"</span></span>
+              <span>Results for <span className="font-bold text-gray-900">&quot;{urlQuery}&quot;</span></span>
             ) : urlCategory ? (
               <span>Category: <span className="font-bold text-gray-900">{urlCategory}</span></span>
             ) : (
-              <span>Showing all books nearby</span>
+              <span className="flex items-center gap-1"><TrendingUp className="w-4 h-4 text-amber-600" /> Trending & Recommended</span>
             )}
           </div>
 
@@ -231,7 +270,7 @@ export default function BuyerDashboard() {
                 ))}
               </select>
             </div>
-            {/* Mobile Cart Trigger if needed, though Layout has it too. */}
+            {/* Mobile Cart Trigger */}
             <button
               onClick={() => setIsCartOpen(true)}
               className="md:hidden relative p-2 text-gray-600"
@@ -242,25 +281,6 @@ export default function BuyerDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Hero Section - Only show when no search/filter active */}
-      {!urlQuery && !urlCategory && !selectedCity && (
-        <div className="mb-8 bg-amber-900 text-white relative overflow-hidden">
-          <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1507842217343-583bb7270b66?ixlib=rb-1.2.1&auto=format&fit=crop&w=1950&q=80')] bg-cover bg-center mix-blend-overlay"></div>
-          <div className="max-w-7xl mx-auto px-6 py-16 md:py-24 relative z-10 text-center">
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">Discover Your Next Favorite Book</h1>
-            <p className="text-amber-100 text-lg max-w-2xl mx-auto mb-8">Buy, sell, and exchange pre-loved books within your community. Sustainable reading starts here.</p>
-            <div className="flex justify-center gap-4">
-              <button onClick={() => {
-                const el = document.getElementById('book-grid');
-                el?.scrollIntoView({ behavior: 'smooth' });
-              }} className="px-8 py-3 bg-white text-amber-900 font-bold rounded-full hover:bg-amber-50 transition shadow-lg">
-                Start Browsing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Cart Drawer */}
       {isCartOpen && (
@@ -281,7 +301,7 @@ export default function BuyerDashboard() {
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400">
                   <ShoppingCart className="w-16 h-16 mb-4 opacity-10" />
                   <p className="text-lg font-medium">Your cart is empty</p>
-                  <p className="text-sm">Looks like you haven't added any books yet.</p>
+                  <p className="text-sm">Looks like you haven&apos;t added any books yet.</p>
                   <button onClick={() => setIsCartOpen(false)} className="mt-6 px-6 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition">
                     Continue Shopping
                   </button>
@@ -289,8 +309,13 @@ export default function BuyerDashboard() {
               ) : (
                 cart.map(item => (
                   <div key={item.id} className="flex gap-4 p-3 bg-gray-50 border border-gray-100 rounded-xl hover:border-amber-200 transition group">
-                    <div className="w-20 h-24 flex-shrink-0 bg-gray-200 rounded-md overflow-hidden">
-                      <img src={getBookImage(item)} alt={item.title} className="w-full h-full object-cover" />
+                    <div className="w-20 h-24 flex-shrink-0 bg-gray-200 rounded-md overflow-hidden relative">
+                      <Image
+                        src={getBookImage(item)}
+                        alt={item.title}
+                        fill
+                        className="object-cover"
+                      />
                     </div>
                     <div className="flex-1 flex flex-col justify-between">
                       <div>
@@ -378,12 +403,11 @@ export default function BuyerDashboard() {
           <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
             <Search className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900">No books found</h3>
-            <p className="text-gray-500">We couldn't find any books matching your criteria.</p>
+            <p className="text-gray-500">We couldn&apos;t find any books matching your criteria.</p>
             <button
               onClick={() => {
                 window.history.replaceState(null, '', '/dashboard/buyer');
                 window.location.reload();
-                /* Simple reload to clear params as next/nav router can be tricky inside onClick here without router hook */
               }}
               className="mt-4 text-amber-600 hover:text-amber-700 font-medium"
             >
@@ -391,89 +415,179 @@ export default function BuyerDashboard() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {books.map((book) => (
-              <div key={book.id} className="group bg-white rounded-xl shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 border border-gray-100 overflow-hidden flex flex-col h-full relative hover:-translate-y-1">
-                <div className="relative aspect-[3/4] overflow-hidden bg-gray-100">
-                  <img
-                    src={getBookImage(book)}
-                    alt={book.title}
-                    loading="lazy"
-                    className="w-full h-full object-cover transform group-hover:scale-105 transition duration-700"
-                  />
-                  <div className="absolute top-0 right-0 p-3">
-                    <button className="p-2 bg-white/80 backdrop-blur rounded-full text-gray-500 hover:text-red-500 transition shadow-sm">
-                      <Heart className="w-4 h-4" />
-                    </button>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {books.map((book) => (
+                <div key={book.id} className="group bg-white rounded-xl shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 border border-gray-100 overflow-hidden flex flex-col h-full relative hover:-translate-y-1">
+                    <div
+                        className="relative aspect-[3/4] overflow-hidden bg-gray-100 cursor-pointer"
+                        onClick={() => handleViewBook(book)}
+                    >
+                    <Image
+                        src={getBookImage(book)}
+                        alt={book.title}
+                        fill
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        className="object-cover transform group-hover:scale-105 transition duration-700"
+                    />
+                    <div className="absolute top-0 right-0 p-3 flex gap-2">
+                        <button className="p-2 bg-white/80 backdrop-blur rounded-full text-gray-500 hover:text-blue-500 transition shadow-sm" title="View Details">
+                            <Eye className="w-4 h-4" />
+                        </button>
+                    </div>
 
-                  </div>
-
-                  {/* Discount Badge */}
-                  {Number(book.discount) > 0 && (
-                    <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg z-10">
-                      {book.discount}% OFF
-                    </div>
-                  )}
-                  {book.distance !== null && book.distance !== undefined && (
-                    <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur px-2 py-1 rounded-md text-xs font-medium text-white flex items-center gap-1">
-                      <MapPin className="w-3 h-3" /> {book.distance.toFixed(3)} km
-                    </div>
-                  )}
-                  {/* Status Overlay */}
-                  {book.status && book.status !== 'available' && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm z-10">
-                      <span className={`px-4 py-2 rounded-full text-white font-bold text-sm tracking-wider uppercase shadow-lg ${book.status === 'sold' ? 'bg-red-600' : 'bg-amber-600'
-                        }`}>
-                        {book.status === 'on-hold' ? 'Booked' : 'Sold Out'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-5 flex-1 flex flex-col">
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-lg text-gray-800 line-clamp-1 group-hover:text-amber-700 transition" title={book.title}>{book.title}</h3>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 mb-3 uppercase tracking-wider font-semibold">
-                      <span className="text-amber-600">{book.category || 'General'}</span>
-                      <span>•</span>
-                      <span>{book.seller?.name}</span>
-                    </div>
-                    <p className="text-gray-600 text-sm line-clamp-2 mb-4 h-10">{book.description}</p>
-                    <div className="flex items-center justify-between mb-4">
-                      {Number(book.discount) > 0 ? (
-                        <div className="flex flex-col">
-                          <span className="text-xs text-gray-500 line-through">Rs. {book.price}</span>
-                          <span className="text-xl font-bold text-red-600">Rs. {calculateDiscountedPrice(book.price, book.discount)}</span>
+                    {/* Discount Badge */}
+                    {Number(book.discount) > 0 && (
+                        <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg z-10">
+                        {book.discount}% OFF
                         </div>
-                      ) : (
-                        <span className="text-xl font-bold text-gray-900">Rs. {book.price}</span>
-                      )}
-                      {/* Rating placeholder */}
-                      <div className="flex items-center gap-1 text-yellow-400 text-xs">
-                        <Star className="w-3 h-3 fill-current" />
-                        <span className="text-gray-400">4.5</span>
-                      </div>
+                    )}
+                    {book.distance !== null && book.distance !== undefined && (
+                        <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur px-2 py-1 rounded-md text-xs font-medium text-white flex items-center gap-1">
+                        <MapPin className="w-3 h-3" /> {book.distance.toFixed(3)} km
+                        </div>
+                    )}
+                    {/* Status Overlay */}
+                    {book.status && book.status !== 'available' && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm z-10">
+                        <span className={`px-4 py-2 rounded-full text-white font-bold text-sm tracking-wider uppercase shadow-lg ${book.status === 'sold' ? 'bg-red-600' : 'bg-amber-600'
+                            }`}>
+                            {book.status === 'on-hold' ? 'Booked' : 'Sold Out'}
+                        </span>
+                        </div>
+                    )}
                     </div>
-                  </div>
 
-                  <button
-                    onClick={() => addToCart(book)}
-                    disabled={book.status && book.status !== 'available'}
-                    className={`w-full py-3 rounded-xl font-medium transition flex items-center justify-center gap-2 relative overflow-hidden active:scale-95 ${book.status && book.status !== 'available'
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-gray-900 text-white hover:bg-amber-600 hover:shadow-lg hover:shadow-amber-200'
-                      }`}
-                  >
-                    <ShoppingCart className="w-4 h-4" /> {book.status && book.status !== 'available' ? 'Unavailable' : 'Add to Cart'}
-                  </button>
+                    <div className="p-5 flex-1 flex flex-col">
+                    <div className="flex-1 cursor-pointer" onClick={() => handleViewBook(book)}>
+                        <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-bold text-lg text-gray-800 line-clamp-1 group-hover:text-amber-700 transition" title={book.title}>{book.title}</h3>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gray-500 mb-3 uppercase tracking-wider font-semibold">
+                        <span className="text-amber-600">{book.category || 'General'}</span>
+                        <span>•</span>
+                        <span>{book.seller?.name}</span>
+                        </div>
+                        <p className="text-gray-600 text-sm line-clamp-2 mb-4 h-10">{book.description}</p>
+                        <div className="flex items-center justify-between mb-4">
+                        {Number(book.discount) > 0 ? (
+                            <div className="flex flex-col">
+                            <span className="text-xs text-gray-500 line-through">Rs. {book.price}</span>
+                            <span className="text-xl font-bold text-red-600">Rs. {calculateDiscountedPrice(book.price, book.discount)}</span>
+                            </div>
+                        ) : (
+                            <span className="text-xl font-bold text-gray-900">Rs. {book.price}</span>
+                        )}
+                        {/* Rating placeholder */}
+                        <div className="flex items-center gap-1 text-yellow-400 text-xs">
+                            <Star className="w-3 h-3 fill-current" />
+                            <span className="text-gray-400">4.5</span>
+                        </div>
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => addToCart(book)}
+                        disabled={book.status && book.status !== 'available'}
+                        className={`w-full py-3 rounded-xl font-medium transition flex items-center justify-center gap-2 relative overflow-hidden active:scale-95 ${book.status && book.status !== 'available'
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-900 text-white hover:bg-amber-600 hover:shadow-lg hover:shadow-amber-200'
+                        }`}
+                    >
+                        <ShoppingCart className="w-4 h-4" /> {book.status && book.status !== 'available' ? 'Unavailable' : 'Add to Cart'}
+                    </button>
+                    </div>
                 </div>
-              </div>
-            ))}
-          </div>
+                ))}
+            </div>
+
+            {/* Load More Button */}
+            {pagination.page < pagination.totalPages && (
+                <div className="mt-8 flex justify-center">
+                    <button
+                        onClick={loadMore}
+                        disabled={loadingMore}
+                        className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-full font-medium transition disabled:opacity-50"
+                    >
+                        {loadingMore ? 'Loading...' : 'Load More Books'}
+                    </button>
+                </div>
+            )}
+          </>
         )}
       </div>
+
+      {/* Book Details Modal */}
+      <Modal
+        isOpen={!!viewBook}
+        onClose={() => setViewBook(null)}
+        title={viewBook ? viewBook.title : 'Book Details'}
+      >
+          {viewBook && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-2">
+                  {(() => {
+                    let imgs = viewBook.images;
+                    if (typeof imgs === 'string') {
+                      try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; }
+                    }
+                    imgs = Array.isArray(imgs) ? imgs : [];
+                    return imgs.length > 0 ? (
+                      imgs.map((img, idx) => (
+                        <div key={idx} className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 relative">
+                          <Image src={img} alt={`${viewBook.title} ${idx + 1}`} fill className="object-cover" sizes="50vw" />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="aspect-[4/5] w-full rounded-xl overflow-hidden bg-gray-100 flex items-center justify-center text-gray-400">
+                        No Images
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                      <h2 className="2xl font-bold text-gray-800">{viewBook.title}</h2>
+                      <div className="text-sm text-gray-500 flex items-center gap-1">
+                          <Eye className="w-4 h-4" /> {viewBook.views !== undefined ? viewBook.views + 1 : 1} views
+                      </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-2 mb-4">
+                    <span className="px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-sm font-medium">{viewBook.category}</span>
+                    <span className="text-xl font-bold text-amber-600">Rs. {calculateDiscountedPrice(viewBook.price, viewBook.discount)}</span>
+                    {Number(viewBook.discount) > 0 && (
+                      <span className="px-2 py-1 bg-red-100 text-red-600 text-xs font-bold rounded-md">-{viewBook.discount}% OFF</span>
+                    )}
+                  </div>
+                  <p className="text-gray-600 leading-relaxed">{viewBook.description}</p>
+                  <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-gray-500">
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <span className="block font-medium text-gray-700">Pages</span>
+                      {viewBook.pages}
+                    </div>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <span className="block font-medium text-gray-700">Seller</span>
+                      {viewBook.seller ? viewBook.seller.name : 'Unknown'}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                      <button
+                        onClick={() => { addToCart(viewBook); setViewBook(null); }}
+                        disabled={viewBook.status && viewBook.status !== 'available'}
+                        className={`w-full py-3 rounded-xl font-medium transition flex items-center justify-center gap-2 ${viewBook.status && viewBook.status !== 'available'
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-900 text-white hover:bg-amber-600 shadow-lg'
+                        }`}
+                      >
+                        <ShoppingCart className="w-4 h-4" /> Add to Cart
+                      </button>
+                  </div>
+                </div>
+              </div>
+          )}
+      </Modal>
     </div>
   );
 }
